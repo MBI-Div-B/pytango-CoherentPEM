@@ -29,20 +29,27 @@ class CoherentPEM(Device):
                          doc='Device ID string')
     
     Value = attribute(label='Value',
-                         dtype='DevString',
+                         dtype='DevDouble',
                          access=AttrWriteType.READ,
                          doc='Queries the last recorded measurement')
-
-    Mode = attribute(label='Mode',
+    
+    Mode = attribute(label='Mode / Unit',
                          dtype='DevEnum',
-                         enum_labels=["Energy", "Power"],
+                         enum_labels=["J", "mJ", "uJ", "W", "mW", "uW"],
                          access=AttrWriteType.READ_WRITE,
+                         memorized = True,
+                         hw_memorized = True,
                          doc='Sets/queries the sensor measurement mode')
+    
+    SeqID = attribute(label='Sequence ID',
+                         dtype='DevLong',
+                         access=AttrWriteType.READ,
+                         doc='Queries the sequence ID / time stamp of last recorded measurement')
 
     Wavelength = attribute(label='Wavelength',
                          dtype='DevDouble',
                          access=AttrWriteType.READ_WRITE,
-                         unit= 'nm',
+                         unit='nm',
                          doc='Sets/queries the current wavelength')
 
     Gain_onoff = attribute(label='Gain Correction',
@@ -67,12 +74,20 @@ class CoherentPEM(Device):
             self.ser.flushOutput()
             self.ser.write(bytearray("*IDN?\r",'ascii'))
             self.ID = self.ser.readline().decode("utf-8").lstrip().rstrip()
-            #self.ser.write(bytearray("CONFigure:ITEMselect PULS\r",'ascii'))
             self.info_stream("Connected to device ID: {:s}".format(self.ID))
+
+            if 'EnergyMax' in self.ID:
+                self.ser.write(bytearray("CONFigure:ITEMselect PULS,PER,FLAG,SEQ\r",'ascii'))
+                self.ser.write(bytearray("CONFigure:STATistics:ITEMselect MEAN,MIN,MAX,STDV,DOSE,MISS,FLAG,SEQ\r",'ascii'))
+                self.ser.write(bytearray("CONFigure:MEASure:STATistics?\r",'ascii'))
+                if self.ser.readline().decode("utf-8").lstrip().rstrip() == "ON":
+                    self.ser.write(bytearray("CONFigure:STATistics:STARt\r",'ascii'))
+                    self.statmode = True
+                else:
+                    self.statmode = False
+
             self.set_status("The device is in ON state")
             self.set_state(DevState.ON)
-            self.ser.write(bytearray("CONFigure:ITEMselect PULS,PER,FLAG,SEQ\r",'ascii'))
-            self.ser.write(bytearray("CONFigure:STATistics:ITEMselect MEAN,MIN,MAX,STDV,SEQ\r",'ascii'))
         except:
             self.error_stream("Could not connect to port {:s}!".format(self.Port))
             self.set_status("The device is in OFF state")
@@ -87,6 +102,41 @@ class CoherentPEM(Device):
                             fget='read_Statistics_mode',
                             fset='write_Statistics_mode')
             self.add_attribute(Statistics_mode)
+
+            Statistics_min = attribute(name='Min',
+                            dtype='DevDouble',
+                            access=AttrWriteType.READ,
+                            doc='Queries the min value in batch',
+                            fget='read_Statistics_min')
+            self.add_attribute(Statistics_min)
+
+            Statistics_max = attribute(name='Max',
+                            dtype='DevDouble',
+                            access=AttrWriteType.READ,
+                            doc='Queries the max value in batch',
+                            fget='read_Statistics_max')
+            self.add_attribute(Statistics_max)
+
+            Statistics_std = attribute(name='Std',
+                            dtype='DevDouble',
+                            access=AttrWriteType.READ,
+                            doc='Queries the standard deviation in batch',
+                            fget='read_Statistics_std')
+            self.add_attribute(Statistics_std)
+
+            Statistics_dose = attribute(name='Dose',
+                            dtype='DevDouble',
+                            access=AttrWriteType.READ,
+                            doc='Queries the dose in batch',
+                            fget='read_Statistics_dose')
+            self.add_attribute(Statistics_dose)
+
+            Statistics_missed = attribute(name='Missed',
+                            dtype='DevLong',
+                            access=AttrWriteType.READ,
+                            doc='Queries the number of missed pulses in batch',
+                            fget='read_Statistics_missed')
+            self.add_attribute(Statistics_missed)
 
             Statistics_bsize = attribute(name='Statistics Batch Size',
                             dtype='DevLong',
@@ -185,17 +235,32 @@ class CoherentPEM(Device):
         return self.ID
     
     def read_Value(self):
-        #self.ser.write(bytearray("SYSTem:ERRor:COUNt?\r",'ascii'))
-        #self.ser.write(bytearray("CONFigure:ITEMselect?\r",'ascii'))
-        #self.ser.write(bytearray("TRIGger:BUS:PMODe?\r",'ascii'))
         self.ser.write(bytearray("READ?\r",'ascii'))
-        #time.sleep(0.1)
-        power = self.ser.readline().decode("utf-8").lstrip().rstrip()
+        response = self.ser.readline().decode("utf-8").lstrip().rstrip()
+        data = response.split(',')
+        
+        if 'EnergyMax' in self.ID:
+            if self.statmode == False:
+                value = float(data[0])
+                self.period = int(data[1])
+                self.flags = data[2]
+                self.seqid = int(data[3])
+                self.min = ''
+                self.max = ''
+                self.std = ''
+                self.dose = ''
+                self.missed = ''
+            else:
+                value = float(data[0])
+                self.min = float(data[1])
+                self.max = float(data[2])
+                self.std = float(data[3])
+                self.dose = float(data[4])
+                self.missed = int(data[5])
+                self.flags = data[6]
+                self.seqid = int(data[7])
 
-        return power
-        # powermW = float(power) * 1000
-        # return powermW
-        # return str(random.randint(0,9))
+        return value * (1000**self.unitscale)
 
     def read_Mode(self):
         if 'EnergyMax' in self.ID:
@@ -203,27 +268,33 @@ class CoherentPEM(Device):
         if 'PowerMax' in self.ID:
             self.ser.write(bytearray("CONFigure:MEASure?\r",'ascii'))
 
-        change_prop = self.Value.get_properties()
-        
         if self.ser.readline().decode("utf-8").lstrip().rstrip() == "J":
-            change_prop.unit = "J"
-            self.Value.set_properties(change_prop)
-            return 0
+            return 0 + self.unitscale
         else:
-            change_prop.unit = "W"
-            self.Value.set_properties(change_prop)
-            return 1
+            return 3 + self.unitscale
 
     def write_Mode(self, value):
-        if value == 0:
+        if value < 3:
             set_mode = "J"
         else:
             set_mode = "W"
 
         if 'EnergyMax' in self.ID:
            self.ser.write(bytearray("CONFigure:MEASure:TYPE "+set_mode+"\r",'ascii'))
+           if self.statmode:
+               self.ser.write(bytearray("CONFigure:STATistics:STARt\r",'ascii'))
         if 'PowerMax' in self.ID:
            self.ser.write(bytearray("CONFigure:MEASure "+set_mode+"\r",'ascii'))
+
+        self.unitscale = value%3
+        self.unitnames = ['J','mJ','uJ','W','mW','uW']
+
+        value_prop = self.Value.get_properties()
+        value_prop.unit = self.unitnames[value]
+        self.Value.set_properties(value_prop)
+        
+    def read_SeqID(self):
+        return self.seqid
 
     def read_Wavelength(self):
         self.ser.write(bytearray("CONFigure:WAVElength?\r",'ascii'))
@@ -255,15 +326,34 @@ class CoherentPEM(Device):
     def read_Statistics_mode(self, attr):
         self.ser.write(bytearray("CONFigure:MEASure:STATistics?\r",'ascii'))
         if self.ser.readline().decode("utf-8").lstrip().rstrip() == "ON":
-            return True
+            attr.set_value(True)
         else:
-            return False
+            attr.set_value(False)
         
     def write_Statistics_mode(self, attr):
         if attr.get_write_value() == True:
             self.ser.write(bytearray("CONFigure:MEASure:STATistics ON\r",'ascii'))
+            self.ser.write(bytearray("CONFigure:STATistics:STARt\r",'ascii'))
+            self.statmode = True
         else:
+            self.ser.write(bytearray("CONFigure:STATistics:STOP\r",'ascii'))
             self.ser.write(bytearray("CONFigure:MEASure:STATistics OFF\r",'ascii'))
+            self.statmode = False
+
+    def read_Statistics_min(self, attr):
+        attr.set_value(self.min * (1000**self.unitscale))
+
+    def read_Statistics_max(self, attr):
+        attr.set_value(self.max * (1000**self.unitscale))
+
+    def read_Statistics_std(self, attr):
+        attr.set_value(self.std * (1000**self.unitscale))
+
+    def read_Statistics_dose(self, attr):
+        attr.set_value(self.dose * (1000**self.unitscale))
+
+    def read_Statistics_missed(self, attr):
+        attr.set_value(self.missed)
 
     def read_Statistics_bsize(self, attr):
         self.ser.write(bytearray("CONFigure:STATistics:BSIZe?\r",'ascii'))
