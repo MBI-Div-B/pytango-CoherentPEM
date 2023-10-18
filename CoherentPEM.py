@@ -9,7 +9,7 @@
 from enum import IntEnum
 from tango import AttrWriteType, DevState, DebugIt, DispLevel, Attr, READ_WRITE, CmdArgType
 from tango.server import Device, attribute, command, device_property
-import serial, random
+import serial, random, time
 
 class CoherentPEM(Device):
     '''
@@ -67,9 +67,12 @@ class CoherentPEM(Device):
             self.ser.flushOutput()
             self.ser.write(bytearray("*IDN?\r",'ascii'))
             self.ID = self.ser.readline().decode("utf-8").lstrip().rstrip()
+            #self.ser.write(bytearray("CONFigure:ITEMselect PULS\r",'ascii'))
             self.info_stream("Connected to device ID: {:s}".format(self.ID))
             self.set_status("The device is in ON state")
             self.set_state(DevState.ON)
+            self.ser.write(bytearray("CONFigure:ITEMselect PULS,PER,FLAG,SEQ\r",'ascii'))
+            self.ser.write(bytearray("CONFigure:STATistics:ITEMselect MEAN,MIN,MAX,STDV,SEQ\r",'ascii'))
         except:
             self.error_stream("Could not connect to port {:s}!".format(self.Port))
             self.set_status("The device is in OFF state")
@@ -77,6 +80,60 @@ class CoherentPEM(Device):
 
     def initialize_dynamic_attributes(self):
         if 'EnergyMax' in self.ID:
+            Statistics_mode = attribute(name='Statistics Mode',
+                            dtype='DevBoolean',
+                            access=AttrWriteType.READ_WRITE,
+                            doc='Enables/disables statistics processing mode',
+                            fget='read_Statistics_mode',
+                            fset='write_Statistics_mode')
+            self.add_attribute(Statistics_mode)
+
+            Statistics_bsize = attribute(name='Statistics Batch Size',
+                            dtype='DevLong',
+                            access=AttrWriteType.READ_WRITE,
+                            doc='Sets/queries the statistics batch size',
+                            fget='read_Statistics_bsize',
+                            fset='write_Statistics_bsize')
+            self.add_attribute(Statistics_bsize)
+
+            Statistics_rmode = attribute(name='Statistics Restart Mode',
+                            dtype='DevEnum',
+                            enum_labels=["Manual", "Automatic"],
+                            access=AttrWriteType.READ_WRITE,
+                            doc='Selects the statistics restart behavior at the end of statistical batch',
+                            fget='read_Statistics_rmode',
+                            fset='write_Statistics_rmode')
+            self.add_attribute(Statistics_rmode)
+
+            Decimation_rate = attribute(name='Decimation Rate',
+                            dtype='DevLong',
+                            access=AttrWriteType.READ_WRITE,
+                            doc='Sets/queries the pulse decimation rate',
+                            fget='read_Decimation_rate',
+                            fset='write_Decimation_rate')
+            self.add_attribute(Decimation_rate)
+
+            Aperture_diameter = attribute(name='Aperture Diameter',
+                            dtype='DevDouble',
+                            access=AttrWriteType.READ_WRITE,
+                            unit="mm",
+                            doc='Sets/queries the aperture diameter',
+                            fget='read_Aperture_diameter',
+                            fset='write_Aperture_diameter')
+            self.add_attribute(Aperture_diameter)
+
+            Range = attribute(name='Range',
+                            dtype='DevEnum',
+                            enum_labels=["High", "Low"],
+                            access=AttrWriteType.READ_WRITE,
+                            doc='Selects the meter measurement range',
+                            fget='read_Range',
+                            fset='write_Range')
+            self.add_attribute(Range)
+
+            self.ser.write(bytearray("CONFigure:RANGe:SELect? MAX\r",'ascii'))
+            self.maxrange = float(self.ser.readline().decode("utf-8").lstrip().rstrip())
+
             Trigger_source = attribute(name='Trigger Source',
                             dtype='DevEnum',
                             enum_labels=["Internal", "External"],
@@ -128,8 +185,13 @@ class CoherentPEM(Device):
         return self.ID
     
     def read_Value(self):
+        #self.ser.write(bytearray("SYSTem:ERRor:COUNt?\r",'ascii'))
+        #self.ser.write(bytearray("CONFigure:ITEMselect?\r",'ascii'))
+        #self.ser.write(bytearray("TRIGger:BUS:PMODe?\r",'ascii'))
         self.ser.write(bytearray("READ?\r",'ascii'))
+        #time.sleep(0.1)
         power = self.ser.readline().decode("utf-8").lstrip().rstrip()
+
         return power
         # powermW = float(power) * 1000
         # return powermW
@@ -190,6 +252,70 @@ class CoherentPEM(Device):
     def write_Gain_factor(self, value):
         self.ser.write(bytearray("CONFigure:GAIN:FACTor "+str(value)+"\r",'ascii'))
 
+    def read_Statistics_mode(self, attr):
+        self.ser.write(bytearray("CONFigure:MEASure:STATistics?\r",'ascii'))
+        if self.ser.readline().decode("utf-8").lstrip().rstrip() == "ON":
+            return True
+        else:
+            return False
+        
+    def write_Statistics_mode(self, attr):
+        if attr.get_write_value() == True:
+            self.ser.write(bytearray("CONFigure:MEASure:STATistics ON\r",'ascii'))
+        else:
+            self.ser.write(bytearray("CONFigure:MEASure:STATistics OFF\r",'ascii'))
+
+    def read_Statistics_bsize(self, attr):
+        self.ser.write(bytearray("CONFigure:STATistics:BSIZe?\r",'ascii'))
+        attr.set_value(int(self.ser.readline().decode("utf-8").lstrip().rstrip()))
+
+    def write_Statistics_bsize(self, attr):
+        self.ser.write(bytearray("CONFigure:STATistics:BSIZe "+str(attr.get_write_value())+"\r",'ascii'))
+
+    def read_Statistics_rmode(self, attr):
+        self.ser.write(bytearray("CONFigure:STATistics:RMOde?\r",'ascii'))
+        if self.ser.readline().decode("utf-8").lstrip().rstrip() == "MAN":
+           attr.set_value(0)
+        else:
+           attr.set_value(1)
+
+    def write_Statistics_rmode(self, attr):
+        if attr.get_write_value() == 0:
+            set_trigger_source = "MAN"
+        else:
+            set_trigger_source = "AUT"
+
+        self.ser.write(bytearray("CONFigure:STATistics:RMOde "+set_trigger_source+"\r",'ascii'))
+
+    def read_Decimation_rate(self, attr):
+        self.ser.write(bytearray("CONFigure:DECimation?\r",'ascii'))
+        attr.set_value(int(self.ser.readline().decode("utf-8").lstrip().rstrip()))
+
+    def write_Decimation_rate(self, attr):
+        self.ser.write(bytearray("CONFigure:DECimation "+str(attr.get_write_value())+"\r",'ascii'))
+
+    def read_Aperture_diameter(self, attr):
+        self.ser.write(bytearray("CONFigure:DIAMeter ?\r",'ascii'))
+        attr.set_value(float(self.ser.readline().decode("utf-8").lstrip().rstrip()))
+
+    def write_Aperture_diameter(self, attr):
+        self.ser.write(bytearray("CONFigure:DIAMeter "+str(attr.get_write_value())+"\r",'ascii'))
+
+    def read_Range(self, attr):
+        self.ser.write(bytearray("CONFigure:RANGe:SELect?\r",'ascii'))
+        if float(self.ser.readline().decode("utf-8").lstrip().rstrip()) == self.maxrange:
+           attr.set_value(0)
+        else:
+           attr.set_value(1)
+
+    def write_Range(self, attr):
+        if attr.get_write_value() == 0:
+            set_range = "MAX"
+        else:
+            set_range = "MIN"
+
+        self.ser.write(bytearray("CONFigure:RANGe:SELect "+set_range+"\r",'ascii'))
+
     def read_Trigger_source(self, attr):
         self.ser.write(bytearray("TRIGger:SOURce?\r",'ascii'))
         if self.ser.readline().decode("utf-8").lstrip().rstrip() == "INT":
@@ -235,6 +361,16 @@ class CoherentPEM(Device):
         self.ser.write(bytearray("TRIGger:DELay "+str(attr.get_write_value())+"\r",'ascii'))
 
 # ------ COMMANDS ------ #
+
+    @command(dtype_in=str, dtype_out=str, doc_in="enter a query", doc_out="the response")
+    def send_query(self, query):
+        self.ser.write(bytearray(query+"\r",'ascii'))
+        return self.ser.readline().decode("utf-8").lstrip().rstrip() 
+
+    @command(dtype_in=str, dtype_out=str, doc_in="enter a command", doc_out="the response")
+    def send_cmd(self, cmd):
+        self.ser.write(bytearray(cmd+"\r",'ascii'))
+        return ""
 
 
 # start the server
