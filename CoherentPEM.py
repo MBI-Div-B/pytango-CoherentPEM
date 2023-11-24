@@ -151,6 +151,7 @@ class CoherentPEM(Device):
                             label='Std',
                             dtype='DevDouble',
                             access=AttrWriteType.READ,
+                            unit='%',
                             doc='Queries the standard deviation in batch',
                             fget='read_Statistics_std')
             self.add_attribute(Statistics_std)
@@ -293,7 +294,6 @@ class CoherentPEM(Device):
                             label='Std',
                             dtype='DevDouble',
                             access=AttrWriteType.READ,
-                            unit='%',
                             doc='Calculates the standard deviation from batch',
                             fget='read_Statistics_calc_std')
             self.add_attribute(Statistics_std)
@@ -406,10 +406,17 @@ class CoherentPEM(Device):
         value_prop.unit = self.unitnames[value]
         self.Value.set_properties(value_prop)
 
-        stat_mean_attr = AttributeProxy(self.get_name()+"/Statistics_mean")
-        stat_mean_prop = stat_mean_attr.get_config()
-        stat_mean_prop.unit = self.unitnames[value]
-        stat_mean_attr.set_config(stat_mean_prop)
+        if 'PowerMax' in self.ID:
+           stat_mean_attr = AttributeProxy(self.get_name()+"/Statistics_mean")
+           stat_mean_prop = stat_mean_attr.get_config()
+           stat_mean_prop.unit = self.unitnames[value]
+           stat_mean_attr.set_config(stat_mean_prop)
+        
+        if 'EnergyMax' in self.ID:
+           stat_std_attr = AttributeProxy(self.get_name()+"/Statistics_std")
+           stat_std_prop = stat_std_attr.get_config()
+           stat_std_prop.unit = self.unitnames[value]
+           stat_std_attr.set_config(stat_std_prop)
 
         stat_min_attr = AttributeProxy(self.get_name()+"/Statistics_min")
         stat_min_prop = stat_min_attr.get_config()
