@@ -147,11 +147,18 @@ class CoherentPEM(Device):
                             fget='read_Statistics_max')
             self.add_attribute(Statistics_max)
 
+            Statistics_mean = attribute(name='Statistics_mean',
+                            label='Mean',
+                            dtype='DevDouble',
+                            access=AttrWriteType.READ,
+                            doc='Calculates the rolling average from batch',
+                            fget='read_Statistics_mean')
+            self.add_attribute(Statistics_mean)
+
             Statistics_std = attribute(name='Statistics_std',
                             label='Std',
                             dtype='DevDouble',
                             access=AttrWriteType.READ,
-                            unit='%',
                             doc='Queries the standard deviation in batch',
                             fget='read_Statistics_std')
             self.add_attribute(Statistics_std)
@@ -294,6 +301,7 @@ class CoherentPEM(Device):
                             label='Std',
                             dtype='DevDouble',
                             access=AttrWriteType.READ,
+                            unit='%',
                             doc='Calculates the standard deviation from batch',
                             fget='read_Statistics_calc_std')
             self.add_attribute(Statistics_std)
@@ -349,7 +357,7 @@ class CoherentPEM(Device):
         
         if 'EnergyMax' in self.ID:
             if self.statmode == False:
-                value = float(data[0])
+                self.value = float(data[0])
                 self.period = int(data[1])
                 self.flags = data[2]
                 self.seqid = int(data[3])
@@ -359,7 +367,7 @@ class CoherentPEM(Device):
                 self.dose = ''
                 self.missed = ''
             else:
-                value = float(data[0])
+                self.value = float(data[0])
                 self.min = float(data[1])
                 self.max = float(data[2])
                 self.std = float(data[3])
@@ -373,7 +381,7 @@ class CoherentPEM(Device):
             self.flags = data[1]
             self.seqid = int(data[2])
 
-        return value * (1000**self.unitscale)
+        return self.value * (1000**self.unitscale)
 
     def read_Mode(self):
         if 'EnergyMax' in self.ID:
@@ -406,11 +414,10 @@ class CoherentPEM(Device):
         value_prop.unit = self.unitnames[value]
         self.Value.set_properties(value_prop)
 
-        if 'PowerMax' in self.ID:
-           stat_mean_attr = AttributeProxy(self.get_name()+"/Statistics_mean")
-           stat_mean_prop = stat_mean_attr.get_config()
-           stat_mean_prop.unit = self.unitnames[value]
-           stat_mean_attr.set_config(stat_mean_prop)
+        stat_mean_attr = AttributeProxy(self.get_name()+"/Statistics_mean")
+        stat_mean_prop = stat_mean_attr.get_config()
+        stat_mean_prop.unit = self.unitnames[value]
+        stat_mean_attr.set_config(stat_mean_prop)
         
         if 'EnergyMax' in self.ID:
            stat_std_attr = AttributeProxy(self.get_name()+"/Statistics_std")
@@ -486,6 +493,9 @@ class CoherentPEM(Device):
 
     def read_Statistics_max(self, attr):
         attr.set_value(self.max * (1000**self.unitscale))
+    
+    def read_Statistics_mean(self, attr):
+        attr.set_value(self.value * (1000**self.unitscale))
 
     def read_Statistics_std(self, attr):
         attr.set_value(self.std * (1000**self.unitscale))
