@@ -377,7 +377,7 @@ class CoherentPEM(Device):
                 self.seqid = int(data[7])
 
         if 'PowerMax' in self.ID:
-            value = float(data[0])
+            self.value = float(data[0])
             self.flags = data[1]
             self.seqid = int(data[2])
 
